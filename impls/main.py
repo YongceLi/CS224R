@@ -1,5 +1,7 @@
-import json
 import os
+os.environ['MUJOCO_GL'] = 'osmesa'
+
+import json
 import random
 import time
 from collections import defaultdict

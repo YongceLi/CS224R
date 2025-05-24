@@ -11,7 +11,7 @@ from utils.flax_utils import ModuleDict, TrainState, nonpytree_field
 from utils.networks import MLP, GCActor, GCDiscreteActor, GCValue, Identity, LengthNormalize
 
 
-class HIQLAgent(flax.struct.PyTreeNode):
+class HIQLRAgent(flax.struct.PyTreeNode):
     """Hierarchical implicit Q-learning (HIQL) agent."""
 
     rng: Any
@@ -274,7 +274,7 @@ class HIQLAgent(flax.struct.PyTreeNode):
             # Low-level actor: pi^l(. | s, phi([s; w]))
             low_actor_encoder_def = GCEncoder(state_encoder=Identity(), concat_encoder=goal_rep_def)
             # High-level actor: pi^h(. | s, g) (i.e., no encoder)
-            high_actor_encoder_def = None
+            high_actor_encoder_def = GCEncoder(state_encoder=Identity(), concat_encoder=goal_rep_def)
 
         # Define value and actor networks.
         value_def = GCValue(

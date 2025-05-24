@@ -3,6 +3,7 @@ from agents.gcbc import GCBCAgent
 from agents.gciql import GCIQLAgent
 from agents.gcivl import GCIVLAgent
 from agents.hiql import HIQLAgent
+from agents.hiql_r import HIQLRAgent
 from agents.qrl import QRLAgent
 from agents.sac import SACAgent
 
@@ -14,4 +15,5 @@ agents = dict(
     hiql=HIQLAgent,
     qrl=QRLAgent,
     sac=SACAgent,
+    hiqlr=HIQLRAgent,
 )
