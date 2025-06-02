@@ -207,7 +207,7 @@ class HIQLRAgent(flax.struct.PyTreeNode):
 
         if not self.config['discrete']:
             actions = jnp.clip(actions, -1, 1)
-        return actions
+        return actions, 0
 
     @classmethod
     def create(
@@ -338,7 +338,7 @@ def get_config():
     config = ml_collections.ConfigDict(
         dict(
             # Agent hyperparameters.
-            agent_name='hiql',  # Agent name.
+            agent_name='hiqlr',  # Agent name.
             lr=3e-4,  # Learning rate.
             batch_size=1024,  # Batch size.
             actor_hidden_dims=(512, 512, 512),  # Actor network hidden dimensions.

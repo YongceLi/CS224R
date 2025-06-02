@@ -11,7 +11,7 @@ from utils.flax_utils import ModuleDict, TrainState, nonpytree_field
 from utils.networks import MLP, GCActor, GCDiscreteActor, GCValue, Identity, LengthNormalize
 
 
-class HIQLAgent(flax.struct.PyTreeNode):
+class HIQLReverseAgent(flax.struct.PyTreeNode):
     """Hierarchical implicit Q-learning (HIQL) agent."""
 
     rng: Any
@@ -111,7 +111,7 @@ class HIQLAgent(flax.struct.PyTreeNode):
         """Compute the high-level actor loss."""
         # v1, v2 is V(s, g)
         v1, v2 = self.network.select('value')(batch['observations'], batch['high_actor_goals'])
-        # nv1, nv2 is V(s_t+k, g)
+        # nv1, nv2 is V(s_t+k, g) or V(s_T-k, g) depending on predict_reverse
         nv1, nv2 = self.network.select('value')(batch['high_actor_targets'], batch['high_actor_goals'])
         v = (v1 + v2) / 2
         nv = (nv1 + nv2) / 2
@@ -120,11 +120,21 @@ class HIQLAgent(flax.struct.PyTreeNode):
         exp_a = jnp.exp(adv * self.config['high_alpha'])
         exp_a = jnp.minimum(exp_a, 100.0)
 
-        dist = self.network.select('high_actor')(batch['observations'], batch['high_actor_goals'], params=grad_params)
-        # the target is phi([s_t; s_t+k])
+        # Get the goal representation directly from the goal_rep network
+        goal_rep = self.network.select('goal_rep')(
+            jnp.concatenate([batch['observations'], batch['high_actor_goals']], axis=-1)
+        )
+        ## this line ADDED
+        # goal_rep = jax.lax.stop_gradient(goal_rep)
+        ####
+        dist = self.network.select('high_actor')(batch['observations'], goal_rep, goal_encoded=True, params=grad_params)
+        # the target is phi([s_t; s_t+k]) or phi([s_t; s_T-k]) depending on predict_reverse
         target = self.network.select('goal_rep')(
             jnp.concatenate([batch['observations'], batch['high_actor_targets']], axis=-1)
         )
+        ## this line ADDED
+        # target = jax.lax.stop_gradient(target)
+        ####
         log_prob = dist.log_prob(target)
 
         actor_loss = -(exp_a * log_prob).mean()
@@ -183,6 +193,95 @@ class HIQLAgent(flax.struct.PyTreeNode):
 
         return self.replace(network=new_network, rng=new_rng), info
 
+    # @jax.jit
+    # def sample_actions(
+    #     self,
+    #     observations,
+    #     goals=None,
+    #     seed=None,
+    #     temperature=1.0,
+    #     max_subgoal_steps=50,
+    #     subgoal_threshold=0.1,
+    # ):
+    #     """Sample actions from the actor.
+
+    #     It iteratively queries the high-level actor to obtain subgoal representations until
+    #     a subgoal is close enough to the current state, then queries the low-level actor
+    #     to obtain raw actions.
+
+    #     Args:
+    #         observations: Current observations.
+    #         goals: Final goals to reach.
+    #         seed: Random seed.
+    #         temperature: Temperature for sampling.
+    #         max_subgoal_steps: Maximum number of subgoal generation steps.
+    #         subgoal_threshold: Threshold for considering a subgoal close enough to current state.
+
+    #     Returns:
+    #         Tuple of (actions, num_steps) where:
+    #         - actions: The sampled actions
+    #         - num_steps: Number of subgoal generation steps taken
+    #     """
+    #     if seed is None:
+    #         seed = self.rng
+    #     # φ([s; s]) – we reuse it each iteration when measuring distance
+    #     self_rep = self.network.select('goal_rep')(
+    #         jnp.concatenate([observations, observations], axis=-1)
+    #     )
+
+    #     # Use goal if given, else treat current state as goal
+    #     init_goal = goals if goals is not None else observations
+    #     # Convert initial goal to goal representation
+    #     init_goal_rep = self.network.select('goal_rep')(
+    #         jnp.concatenate([observations, init_goal], axis=-1)
+    #     )
+
+    #     def one_high_step(carry):
+    #         step, goal_rep, rng = carry
+    #         rng, hi_seed = jax.random.split(rng)
+    #         # High-level policy π_h(. | s, g) - now takes goal representation directly
+    #         hi_dist = self.network.select('high_actor')(
+    #             observations, goal_rep, goal_encoded=True, temperature=temperature
+    #         )
+    #         sub_rep = hi_dist.sample(seed=hi_seed)
+    #         # project to ℓ₂-sphere (needed because φ is length-normalised)
+    #         sub_rep = (
+    #             sub_rep
+    #             / jnp.linalg.norm(sub_rep, axis=-1, keepdims=True)
+    #             * jnp.sqrt(sub_rep.shape[-1])
+    #         )
+
+    #         # Stop when the sub-goal representation is sufficiently close
+    #         done = (
+    #             jnp.linalg.norm(sub_rep - self_rep, axis=-1) <= subgoal_threshold
+    #         )
+
+    #         return (step + 1, sub_rep, rng), done
+
+    #     def cond_fun(state_done):
+    #         (step, _, _), done = state_done
+    #         return jnp.logical_and(~done, step < max_subgoal_steps)
+
+    #     # lax.while_loop needs (state, pred) → state ; so wrap (state, done)
+    #     init_state = (0, init_goal_rep, seed)
+    #     (steps_taken, final_goal_rep, rng_out), _ = jax.lax.while_loop(
+    #         cond_fun, lambda x: one_high_step(x[0]), (init_state, False)
+    #     )
+
+    #     # Low-level policy π_l(. | s, φ([s;w]))
+    #     rng_out, low_seed = jax.random.split(rng_out)
+    #     low_dist = self.network.select('low_actor')(
+    #         observations,
+    #         final_goal_rep,
+    #         goal_encoded=True,
+    #         temperature=temperature,
+    #     )
+    #     actions = low_dist.sample(seed=low_seed)
+    #     if not self.config['discrete']:
+    #         actions = jnp.clip(actions, -1.0, 1.0)
+
+    #     return actions, steps_taken
+
     @jax.jit
     def sample_actions(
         self,
@@ -198,7 +297,12 @@ class HIQLAgent(flax.struct.PyTreeNode):
         """
         high_seed, low_seed = jax.random.split(seed)
 
-        high_dist = self.network.select('high_actor')(observations, goals, temperature=temperature)
+        goal_rep = self.network.select('goal_rep')(
+            jnp.concatenate([observations, goals], axis=-1)
+        )
+        
+        high_dist = self.network.select('high_actor')(observations, goal_rep, goal_encoded=True, temperature=temperature)
+        
         goal_reps = high_dist.sample(seed=high_seed)
         goal_reps = goal_reps / jnp.linalg.norm(goal_reps, axis=-1, keepdims=True) * jnp.sqrt(goal_reps.shape[-1])
 
@@ -208,6 +312,7 @@ class HIQLAgent(flax.struct.PyTreeNode):
         if not self.config['discrete']:
             actions = jnp.clip(actions, -1, 1)
         return actions, 0
+    
 
     @classmethod
     def create(
@@ -272,8 +377,8 @@ class HIQLAgent(flax.struct.PyTreeNode):
             value_encoder_def = GCEncoder(state_encoder=Identity(), concat_encoder=goal_rep_def)
             target_value_encoder_def = GCEncoder(state_encoder=Identity(), concat_encoder=goal_rep_def)
             # Low-level actor: pi^l(. | s, phi([s; w]))
-            low_actor_encoder_def = GCEncoder(state_encoder=Identity(), concat_encoder=goal_rep_def)
-            # High-level actor: pi^h(. | s, g) (i.e., no encoder)
+            low_actor_encoder_def = None
+            # High-level actor: pi^h(. | s, g) where g is already a goal representation
             high_actor_encoder_def = None
 
         # Define value and actor networks.
@@ -313,12 +418,15 @@ class HIQLAgent(flax.struct.PyTreeNode):
             gc_encoder=high_actor_encoder_def,
         )
 
+        # Create example goal representation with the correct dimension
+        ex_goal_reps = jnp.zeros((ex_observations.shape[0], config['rep_dim']), dtype=jnp.float32)
+
         network_info = dict(
             goal_rep=(goal_rep_def, (jnp.concatenate([ex_observations, ex_goals], axis=-1))),
             value=(value_def, (ex_observations, ex_goals)),
             target_value=(target_value_def, (ex_observations, ex_goals)),
-            low_actor=(low_actor_def, (ex_observations, ex_goals)),
-            high_actor=(high_actor_def, (ex_observations, ex_goals)),
+            low_actor=(low_actor_def, (ex_observations, ex_goal_reps)),  # Use goal representations instead of raw goals
+            high_actor=(high_actor_def, (ex_observations, ex_goal_reps)),
         )
         networks = {k: v[0] for k, v in network_info.items()}
         network_args = {k: v[1] for k, v in network_info.items()}
@@ -338,7 +446,7 @@ def get_config():
     config = ml_collections.ConfigDict(
         dict(
             # Agent hyperparameters.
-            agent_name='hiql',  # Agent name.
+            agent_name='hiql_reverse',  # Agent name.
             lr=3e-4,  # Learning rate.
             batch_size=1024,  # Batch size.
             actor_hidden_dims=(512, 512, 512),  # Actor network hidden dimensions.
@@ -355,6 +463,7 @@ def get_config():
             const_std=True,  # Whether to use constant standard deviation for the actors.
             discrete=False,  # Whether the action space is discrete.
             encoder=ml_collections.config_dict.placeholder(str),  # Visual encoder name (None, 'impala_small', etc.).
+            predict_reverse=False,  # Whether to predict s_T-k instead of s_t+k
             # Dataset hyperparameters.
             dataset_class='HGCDataset',  # Dataset class name.
             value_p_curgoal=0.2,  # Probability of using the current state as the value goal.

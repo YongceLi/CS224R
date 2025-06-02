@@ -313,6 +313,7 @@ class HGCDataset(GCDataset):
     This class extends GCDataset to support high-level actor goals and prediction targets. It reads the following
     additional key from the config:
     - subgoal_steps: Subgoal steps (i.e., the number of steps to reach the low-level goal).
+    - predict_reverse: Whether to predict s_T-k instead of s_t+k.
     """
 
     def sample(self, batch_size, idxs=None, evaluation=False):
@@ -366,11 +367,37 @@ class HGCDataset(GCDataset):
             high_traj_goal_idxs = np.round(
                 (np.minimum(idxs + 1, final_state_idxs) * distances + final_state_idxs * (1 - distances))
             ).astype(int)
-        high_traj_target_idxs = np.minimum(idxs + self.config['subgoal_steps'], high_traj_goal_idxs)
+
+        if self.config.get('predict_reverse', False):
+            # print("predict_reverse is True")
+            # For reverse prediction: predict s_T-k given s_T and s_t
+            # high_traj_goal_idxs is s_T, idxs is s_t
+            # We want to predict s_T-k
+            # If goal is within subgoal_steps of current state, predict the goal itself
+            within_subgoal_steps = high_traj_goal_idxs - idxs <= self.config['subgoal_steps']
+            high_traj_target_idxs = np.where(
+                within_subgoal_steps,
+                high_traj_goal_idxs,  # Predict the goal itself
+                np.maximum(high_traj_goal_idxs - self.config['subgoal_steps'], idxs)  # Predict s_T-k
+            )
+        else:
+            # Original forward prediction: predict s_t+k
+            high_traj_target_idxs = np.minimum(idxs + self.config['subgoal_steps'], high_traj_goal_idxs)
 
         # High-level random goals.
         high_random_goal_idxs = self.dataset.get_random_idxs(batch_size)
-        high_random_target_idxs = np.minimum(idxs + self.config['subgoal_steps'], final_state_idxs)
+        if self.config.get('predict_reverse', False):
+            # For reverse prediction with random goals
+            # If random goal is within subgoal_steps of current state, predict the goal itself
+            within_subgoal_steps = high_random_goal_idxs - idxs <= self.config['subgoal_steps']
+            high_random_target_idxs = np.where(
+                within_subgoal_steps,
+                high_random_goal_idxs,  # Predict the goal itself
+                np.maximum(high_random_goal_idxs - self.config['subgoal_steps'], idxs)  # Predict s_T-k
+            )
+        else:
+            # Original forward prediction with random goals
+            high_random_target_idxs = np.minimum(idxs + self.config['subgoal_steps'], final_state_idxs)
 
         # Pick between high-level future goals and random goals.
         pick_random = np.random.rand(batch_size) < self.config['actor_p_randomgoal']

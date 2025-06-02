@@ -1,3 +1,5 @@
+# replace high_actor as pi^h(. | s, phi(s,g)), should perform similar as hiql_r.py
+
 from typing import Any
 
 import flax
@@ -11,7 +13,7 @@ from utils.flax_utils import ModuleDict, TrainState, nonpytree_field
 from utils.networks import MLP, GCActor, GCDiscreteActor, GCValue, Identity, LengthNormalize
 
 
-class HIQLAgent(flax.struct.PyTreeNode):
+class HIQLReverseV2Agent(flax.struct.PyTreeNode):
     """Hierarchical implicit Q-learning (HIQL) agent."""
 
     rng: Any
@@ -119,9 +121,14 @@ class HIQLAgent(flax.struct.PyTreeNode):
 
         exp_a = jnp.exp(adv * self.config['high_alpha'])
         exp_a = jnp.minimum(exp_a, 100.0)
-
-        dist = self.network.select('high_actor')(batch['observations'], batch['high_actor_goals'], params=grad_params)
+        ################################################################################
+        goal_reps = self.network.select('goal_rep')(
+            jnp.concatenate([batch['observations'], batch['high_actor_goals']], axis=-1),
+            params=grad_params,
+        )
+        dist = self.network.select('high_actor')(batch['observations'], goal_reps, goal_encoded=True, params=grad_params)
         # the target is phi([s_t; s_t+k])
+        ################################################################################
         target = self.network.select('goal_rep')(
             jnp.concatenate([batch['observations'], batch['high_actor_targets']], axis=-1)
         )
@@ -274,7 +281,7 @@ class HIQLAgent(flax.struct.PyTreeNode):
             # Low-level actor: pi^l(. | s, phi([s; w]))
             low_actor_encoder_def = GCEncoder(state_encoder=Identity(), concat_encoder=goal_rep_def)
             # High-level actor: pi^h(. | s, g) (i.e., no encoder)
-            high_actor_encoder_def = None
+            high_actor_encoder_def = GCEncoder(state_encoder=Identity(), concat_encoder=goal_rep_def)
 
         # Define value and actor networks.
         value_def = GCValue(
@@ -338,7 +345,7 @@ def get_config():
     config = ml_collections.ConfigDict(
         dict(
             # Agent hyperparameters.
-            agent_name='hiql',  # Agent name.
+            agent_name='hiql_reverse_v2',  # Agent name.
             lr=3e-4,  # Learning rate.
             batch_size=1024,  # Batch size.
             actor_hidden_dims=(512, 512, 512),  # Actor network hidden dimensions.

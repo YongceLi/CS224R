@@ -61,6 +61,7 @@ def evaluate(
     Returns:
         A tuple containing the statistics, trajectories, and rendered videos.
     """
+    print("DEBUG: agent class:", type(agent))
     actor_fn = supply_rng(agent.sample_actions, rng=jax.random.PRNGKey(np.random.randint(0, 2**32)))
     trajs = []
     stats = defaultdict(list)
@@ -77,7 +78,8 @@ def evaluate(
         step = 0
         render = []
         while not done:
-            action = actor_fn(observations=observation, goals=goal, temperature=eval_temperature)
+            action, num_steps = actor_fn(observations=observation, goals=goal, temperature=eval_temperature)
+            # print("Number of subgoal steps:", num_steps)
             action = np.array(action)
             if not config.get('discrete'):
                 if eval_gaussian is not None:
