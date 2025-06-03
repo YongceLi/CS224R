@@ -76,10 +76,10 @@ def evaluate(
         goal_frame = info.get('goal_rendered')
         done = False
         step = 0
+        num_steps = 0
         render = []
         while not done:
             action, num_steps = actor_fn(observations=observation, goals=goal, temperature=eval_temperature)
-            # print("Number of subgoal steps:", num_steps)
             action = np.array(action)
             if not config.get('discrete'):
                 if eval_gaussian is not None:
@@ -107,6 +107,7 @@ def evaluate(
             )
             add_to(traj, transition)
             observation = next_observation
+        print("Number of subgoal steps:", num_steps)
         if i < num_eval_episodes:
             add_to(stats, flatten(info))
             trajs.append(traj)

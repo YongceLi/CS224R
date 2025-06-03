@@ -8,6 +8,8 @@ from agents.hiql_reverse import HIQLReverseAgent
 from agents.qrl import QRLAgent
 from agents.sac import SACAgent
 from agents.hiql_reverse_v2 import HIQLReverseV2Agent
+from agents.hiql_reverse_recur import HIQLReverseRecurAgent
+from agents.hiql_contrastive import HIQLContrastiveAgent
 
 agents = dict(
     crl=CRLAgent,
@@ -20,4 +22,6 @@ agents = dict(
     hiqlr=HIQLRAgent,
     hiql_reverse=HIQLReverseAgent,
     hiql_reverse_v2=HIQLReverseV2Agent,
+    hiql_reverse_recur=HIQLReverseRecurAgent,
+    hiql_contrastive=HIQLContrastiveAgent,
 )
